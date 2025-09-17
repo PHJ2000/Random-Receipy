@@ -10,6 +10,16 @@ const MANUAL_KEYS = Array.from({ length: 20 }, (_, index) =>
   `MANUAL${String(index + 1).padStart(2, '0')}`,
 )
 
+function normalizeIngredientList(ingredients: string[]): string[] {
+  return Array.from(
+    new Set(
+      ingredients
+        .map((item) => item.trim())
+        .filter(Boolean),
+    ),
+  )
+}
+
 export type KoreanRecipeRaw = {
   RCP_SEQ: string
   RCP_NM: string
@@ -125,12 +135,56 @@ export function toMealSummaryFromKorean(recipe: KoreanRecipeRaw): MealSummary {
   }
 }
 
+function extractSourceAndTip(value: string | null | undefined): {
+  source: string | null
+  tip: string | null
+} {
+  if (!value) {
+    return { source: null, tip: null }
+  }
+
+  const trimmed = value.trim()
+  if (!trimmed) {
+    return { source: null, tip: null }
+  }
+
+  try {
+    const url = new URL(trimmed)
+    if (url.protocol === 'http:' || url.protocol === 'https:') {
+      return { source: url.toString(), tip: null }
+    }
+  } catch (error) {
+    void error
+  }
+
+  return { source: null, tip: trimmed }
+}
+
+function recipeIncludesAllIngredients(recipe: KoreanRecipeRaw, ingredients: string[]): boolean {
+  if (ingredients.length === 0) return true
+
+  const normalizedParts = parseParts(recipe.RCP_PARTS_DTLS).map((part) => part.toLowerCase())
+  return ingredients.every((ingredient) =>
+    normalizedParts.some((part) => part.includes(ingredient.toLowerCase())),
+  )
+}
+
+export function toMealDetailFromKorean(recipe: KoreanRecipeRaw): MealDetailRaw {
+  const { source, tip } = extractSourceAndTip(recipe.RCP_NA_TIP)
 export function toMealDetailFromKorean(recipe: KoreanRecipeRaw): MealDetailRaw {
   const detail: MealDetailRaw = {
     idMeal: recipe.RCP_SEQ,
     strMeal: recipe.RCP_NM,
     strMealThumb: recipe.ATT_FILE_NO_MAIN || recipe.ATT_FILE_NO_MK || '',
     strInstructions: mergeManuals(recipe),
+    strSource: source,
+    strYoutube: null,
+  }
+
+  if (tip) {
+    detail.strTip = tip
+  }
+
     strSource: recipe.RCP_NA_TIP ?? null,
     strYoutube: null,
   }
@@ -143,4 +197,56 @@ export function toMealDetailFromKorean(recipe: KoreanRecipeRaw): MealDetailRaw {
   })
 
   return detail
+}
+
+export async function fetchKoreanRecipesByIngredients({
+  serviceKey,
+  ingredients,
+  signal,
+}: {
+  serviceKey: string
+  ingredients: string[]
+  signal?: AbortSignal
+}): Promise<KoreanRecipeRaw[]> {
+  const uniqueIngredients = normalizeIngredientList(ingredients)
+  if (uniqueIngredients.length === 0) {
+    return []
+  }
+
+  const lists = await Promise.all(
+    uniqueIngredients.map((ingredient) =>
+      fetchKoreanRecipes({
+        serviceKey,
+        RCP_PARTS_DTLS: ingredient,
+        signal,
+      }),
+    ),
+  )
+
+  if (lists.some((list) => list.length === 0)) {
+    return []
+  }
+
+  const counts = new Map<string, number>()
+  const recipeMap = new Map<string, KoreanRecipeRaw>()
+
+  lists.forEach((list) => {
+    const seen = new Set<string>()
+    list.forEach((recipe) => {
+      const id = recipe.RCP_SEQ
+      if (!recipeMap.has(id)) {
+        recipeMap.set(id, recipe)
+      }
+      if (!seen.has(id)) {
+        seen.add(id)
+        counts.set(id, (counts.get(id) ?? 0) + 1)
+      }
+    })
+  })
+
+  return Array.from(recipeMap.values()).filter(
+    (recipe) =>
+      counts.get(recipe.RCP_SEQ) === uniqueIngredients.length &&
+      recipeIncludesAllIngredients(recipe, uniqueIngredients),
+  )
 }
