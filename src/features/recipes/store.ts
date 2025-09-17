@@ -81,23 +81,12 @@ export const useRecipeStore = create<State>((set, get) => {
       return null
     }
 
-    const recipeList = await fetchKoreanRecipesByIngredients({
-      serviceKey: KOREAN_SERVICE_KEY,
-      ingredients,
-      signal,
-    }).catch((error: unknown) => {
+
       if (isAbortError(error)) {
         throw error
       }
       return null
-    })
 
-    if (!recipeList || recipeList.length === 0) {
-      return null
-    }
-
-    const selected = toMealDetailFromKorean(pickRandom(recipeList))
-    return toRecipe(selected)
   }
 
   function handleError(error: unknown) {
