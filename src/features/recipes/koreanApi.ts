@@ -171,6 +171,7 @@ function recipeIncludesAllIngredients(recipe: KoreanRecipeRaw, ingredients: stri
 
 export function toMealDetailFromKorean(recipe: KoreanRecipeRaw): MealDetailRaw {
   const { source, tip } = extractSourceAndTip(recipe.RCP_NA_TIP)
+export function toMealDetailFromKorean(recipe: KoreanRecipeRaw): MealDetailRaw {
   const detail: MealDetailRaw = {
     idMeal: recipe.RCP_SEQ,
     strMeal: recipe.RCP_NM,
@@ -182,6 +183,10 @@ export function toMealDetailFromKorean(recipe: KoreanRecipeRaw): MealDetailRaw {
 
   if (tip) {
     detail.strTip = tip
+  }
+
+    strSource: recipe.RCP_NA_TIP ?? null,
+    strYoutube: null,
   }
 
   const ingredients = parseParts(recipe.RCP_PARTS_DTLS)
