@@ -127,6 +127,22 @@ export const useRecipeStore = create<State>((set, get) => {
     }
   }
 
+  async function tryFetchKoreanRecipe(
+    ingredients: string[],
+    signal: AbortSignal,
+  ): Promise<Recipe | null> {
+    if (!KOREAN_SERVICE_KEY) {
+      return null
+    }
+
+
+      if (isAbortError(error)) {
+        throw error
+      }
+      return null
+
+  }
+
   function handleError(error: unknown) {
     if (isAbortError(error)) {
       return
