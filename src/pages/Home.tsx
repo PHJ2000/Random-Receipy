@@ -22,11 +22,10 @@ export default function Home() {
   const inputRef = useRef<HTMLInputElement | null>(null)
   const [bootstrapped, setBootstrapped] = useState(false)
 
-  const isLoading = status === 'loadingList' || status === 'loadingDetail'
+  const isLoading = status === 'loadingList'
 
   const loadingLabel = useMemo(() => {
-    if (status === 'loadingDetail') return '레시피 정보를 불러오는 중…'
-    if (status === 'loadingList') return '레시피 후보를 찾는 중…'
+    if (status === 'loadingList') return '레시피 데이터를 불러오는 중…'
     return '불러오는 중…'
   }, [status])
 
@@ -127,14 +126,14 @@ export default function Home() {
 
       <footer className="mt-12 flex flex-col items-center gap-2 pb-6 text-xs text-slate-500 sm:flex-row sm:justify-between">
         <span>
-          Powered by&nbsp;
+          데이터 출처&nbsp;
           <a
-            href="https://www.themealdb.com/"
+            href="https://www.foodsafetykorea.go.kr/"
             target="_blank"
             rel="noreferrer"
             className="font-medium text-brand hover:text-brand-dark"
           >
-            TheMealDB
+            식품안전나라 (COOKRCP01)
           </a>
         </span>
         <a

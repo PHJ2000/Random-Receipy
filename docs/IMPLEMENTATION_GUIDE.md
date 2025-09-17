@@ -1,396 +1,235 @@
-# 🍳 랜덤 레시피 챌린저 — Codex 구현 지침 (TheMealDB 기반 MVP)
+# 🍳 랜덤 레시피 챌린저 — COOKRCP01 기반 구현 지침
 
-이 문서는 Codex가 최소 기능 제품(MVP)을 빠르게 구현할 수 있도록 돕는 상세 지침입니다. 목표는 **집에 있는 재료를 입력하면 해당 재료로 만들 수 있는 랜덤 레시피 1개를 추천**하는 프론트엔드 단독 웹앱을 완성하는 것입니다.
+이 문서는 Random Receipy 프로젝트가 **식약처 COOKRCP01 공공데이터**를 내부 DB로 적재한 뒤, 프런트엔드에서만 해당 데이터를 조회해 레시피를 추천하도록 구현하는 방법을 정리합니다. TheMealDB를 사용하던 초기 MVP에서 전환된 아키텍처를 기준으로 작성되었습니다.
 
 ---
 
 ## 0. 목표 및 요구사항 요약
 
-- 사용자는 쉼표로 구분한 **재료 목록**을 입력한다. (예: `egg, tomato, onion`)
-- 앱은 TheMealDB Public API를 호출하여 **재료 기반 후보 레시피**를 가져온 후, 그중 **무작위 1개**를 선택한다.
-- 선택된 레시피의 **상세 정보**(이름, 썸네일, 재료/용량 리스트, 조리 순서, 원문 링크/영상)를 표시한다.
-- **랜덤 돌리기 애니메이션/버튼**과 **결과 공유 버튼(링크 복사)** 를 제공한다.
-- **오류/빈 결과**에 대한 사용자 친화적 메시지를 제공한다.
-- 반응형(UI: 모바일 우선)과 접근성(키보드/스크린리더 기본 호환)을 고려한다.
+- 사용자가 쉼표로 구분한 재료 목록을 입력하면, 그 재료를 모두 포함하는 한식 레시피를 찾아 무작위 1개를 추천합니다.
+- 데이터는 식약처 COOKRCP01 API에서 내려받아 **사전 적재된 내부 DB(JSON)** 로 관리합니다. 런타임에는 외부 API를 호출하지 않습니다.
+- 레시피 카드에는 썸네일, 재료/계량, 조리 단계, 영양 팁, 영양 정보(열량·탄수화물·단백질·지방·나트륨·1인분 중량)를 함께 표시합니다.
+- 로딩/빈 결과/오류 상태를 명확히 구분하고, 접근성을 고려한 UI 컴포넌트를 제공합니다.
 
 ---
 
-## 1. 기술 스택 및 구조
+## 1. 시스템 구성 개요
 
 - **Frontend**: Vite + React + TypeScript + Tailwind CSS
-- **State**: Zustand (간단 Global state) 또는 React Query(선호 시)
-- **배포**: Vercel/Netlify (정적 호스팅)
-- **백엔드**: 없음 (브라우저에서 TheMealDB 직접 호출)
+- **상태 관리**: Zustand (`src/features/recipes/store.ts`)
+- **데이터 소스**: `src/features/recipes/data/cookRcpDataset.json` (COOKRCP01 전처리 결과)
+- **API 레이어**: `cookRcpRepository.ts`에서 내부 DB를 조회하고 Meal/Recipe 타입으로 매핑합니다.
+- **테스트**: Vitest + Testing Library (UI) — 레시피 데이터 로직은 `cookRcpRepository.test.ts`에서 단위 테스트로 검증합니다.
 
-폴더 구조 예시
+폴더 구조 개요:
 
 ```
 src/
-  components/
-    IngredientInput.tsx
-    RecipeCard.tsx
-    LoadingSpinner.tsx
-    ErrorState.tsx
-  features/
-    recipes/
-      api.ts       // TheMealDB 호출 래퍼
-      types.ts     // API 응답 -> 앱 도메인 타입
-      utils.ts     // 재료 파싱, 상세 변환 헬퍼
-      store.ts     // Zustand 스토어(선택)
-  pages/
-    Home.tsx
-  app.tsx
-  main.tsx
-  styles.css
+  components/         # UI 컴포넌트 (입력 폼, 상태 UI, 레시피 카드 등)
+  features/recipes/
+    data/
+      cookRcpDataset.json  # 사전 적재된 COOKRCP01 데이터
+    cookRcpRepository.ts   # 데이터 조회 및 정규화
+    cookRcpRepository.test.ts
+    store.ts               # Zustand 스토어
+    types.ts               # API/도메인 타입 정의
+    utils.ts               # Meal → Recipe 변환 유틸
+  pages/Home.tsx           # 상태에 따른 페이지 렌더링
 ```
 
 ---
 
-## 2. API 레퍼런스 (TheMealDB)
+## 2. COOKRCP01 데이터 전처리 & 적재
 
-**Base**: `https://www.themealdb.com/api/json/v1/1`
+1. 식품안전나라 Open API에서 COOKRCP01 데이터를 요청합니다. (예: `https://openapi.foodsafetykorea.go.kr/api/{KEY}/COOKRCP01/json/1/1000`)
+2. 응답 구조는 `COOKRCP01 -> row` 배열에 레시피가 담깁니다. 다음 필드를 선별합니다.
+   - 기본 정보: `RCP_SEQ`, `RCP_NM`, `RCP_PAT2`, `RCP_WAY2`
+   - 이미지: `ATT_FILE_NO_MAIN`, `ATT_FILE_NO_MK`
+   - 재료: `RCP_PARTS_DTLS`
+   - 조리 단계: `MANUAL01` ~ `MANUAL20`, `MANUAL_IMG01` ~ `MANUAL_IMG20`
+   - 영양 정보: `INFO_WGT`, `INFO_ENG`, `INFO_CAR`, `INFO_PRO`, `INFO_FAT`, `INFO_NA`
+   - 영양 팁: `RCP_NA_TIP`
+3. 불필요한 필드를 제거하고, JSON 배열로 저장합니다. (예시는 `src/features/recipes/data/cookRcpDataset.json` 참고)
+4. 데이터 변경 후에는 `npm test`로 변환 로직이 문제없이 동작하는지 확인합니다.
 
-필수 사용 엔드포인트
-
-- **재료로 필터**: `/filter.php?i={commaSeparatedIngredients}`
-  - 예: `/filter.php?i=tomato,onion`
-  - 반환: `{ meals: [{ idMeal, strMeal, strMealThumb }] | null }`
-- **상세 조회**: `/lookup.php?i={mealId}`
-  - 반환: `{ meals: [MealDetail] }`
-- **랜덤(대체/테스트용)**: `/random.php`
-
-선택(확장)
-
-- **이름 검색**: `/search.php?s={query}`
-- **재료 목록**: `/list.php?i=list` (오토컴플리트용)
-
-> CORS는 직접 호출 가능하며 API Key는 불필요(무료 공개 v1). 과도한 요청은 피하고 디바운스나 단일 클릭 처리를 권장한다.
+전처리 스크립트를 별도로 관리한다면, 동일한 스키마를 유지하도록 주의합니다. 문자열 트리밍, 줄바꿈 정리, 단위 표준화 등을 진행하면 UI가 안정적으로 표현됩니다.
 
 ---
 
-## 3. UX 플로우
+## 3. 타입 정의
 
-1. 사용자가 재료 입력 → `재료로 찾기` 클릭
-2. `filter.php?i=`로 후보 목록 요청
-3. 후보가 없으면 **빈 상태 메시지** 표시
-4. 후보가 있으면 **클라이언트에서 무작위 1개 선택**
-5. `lookup.php?i=`로 상세 정보 요청 → 결과 표시
-6. 버튼: `다시 돌리기`(동일 재료로 재시도) / `재료 바꾸기`
-
-### 상태 정의
-
-- `idle`: 초기 상태
-- `loadingList`: 후보 검색 로딩
-- `loadingDetail`: 상세 조회 로딩
-- `success`: 레시피 표시
-- `empty`: 후보 없음
-- `error`: 네트워크/파싱 오류
-
----
-
-## 4. 타입 정의 (TypeScript)
+`src/features/recipes/types.ts`는 두 가지 레이어를 분리합니다.
 
 ```ts
-export type MealSummary = {
-  idMeal: string;
-  strMeal: string;
-  strMealThumb: string; // thumb url
-};
-
-export type FilterResponse = {
-  meals: MealSummary[] | null;
-};
-
 export type MealDetailRaw = {
-  idMeal: string;
-  strMeal: string;
-  strMealThumb: string;
-  strInstructions: string; // 여러 줄 텍스트
-  strSource: string | null;
-  strYoutube: string | null;
-  // 재료/용량 컬럼은 strIngredient1..20, strMeasure1..20 형태
-  [k: string]: string | null;
-};
+  idMeal: string
+  strMeal: string
+  strMealThumb: string
+  strInstructions: string
+  strSource: string | null
+  strYoutube: string | null
+  strTip?: string | null
+  [key: string]: string | null
+}
 
-export type LookupResponse = {
-  meals: MealDetailRaw[];
-};
+export type Ingredient = {
+  name: string
+  measure?: string
+}
 
-export type Ingredient = { name: string; measure?: string };
+export type NutritionInfo = {
+  weight?: number
+  calories?: number
+  carbohydrate?: number
+  protein?: number
+  fat?: number
+  sodium?: number
+}
 
 export type Recipe = {
-  id: string;
-  title: string;
-  thumb: string;
-  instructions: string[]; // 줄 단위로 분해/정제
-  ingredients: Ingredient[];
-  sourceUrl?: string;
-  youtubeUrl?: string;
-};
+  id: string
+  title: string
+  thumb: string
+  instructions: string[]
+  ingredients: Ingredient[]
+  sourceUrl?: string
+  youtubeUrl?: string
+  tip?: string
+  nutrition?: NutritionInfo
+}
 ```
+
+- `MealDetailRaw`는 식약처 원본 스키마를 앱이 이해할 수 있는 구조로 정규화한 형태입니다.
+- `Recipe`는 UI가 바로 사용할 수 있는 도메인 모델로, instructions를 줄 단위로 쪼개고, 영양 정보는 숫자로 변환합니다.
 
 ---
 
-## 5. API 래퍼 및 데이터 변환
+## 4. 내부 DB 조회 로직 (`cookRcpRepository.ts`)
+
+핵심 역할:
+
+1. `cookRcpDataset.json`을 로드해 메모리에 유지합니다.
+2. 재료 문자열을 줄/쉼표/구분점 기준으로 분리해 토큰화합니다.
+3. 사용자가 입력한 재료 목록과 비교해 모든 재료가 포함된 레시피만 필터링합니다.
+4. 선택된 레시피를 `MealDetailRaw`로 변환해 반환합니다.
+
+주요 함수:
 
 ```ts
-const BASE = 'https://www.themealdb.com/api/json/v1/1';
-
-export async function filterByIngredients(ings: string[]): Promise<MealSummary[] | null> {
-  const q = encodeURIComponent(ings.join(','));
-  const res = await fetch(`${BASE}/filter.php?i=${q}`);
-  if (!res.ok) throw new Error('Failed to fetch filter results');
-  const data = (await res.json()) as FilterResponse;
-  return data.meals ?? null;
-}
-
-export async function lookupById(id: string): Promise<MealDetailRaw | null> {
-  const res = await fetch(`${BASE}/lookup.php?i=${id}`);
-  if (!res.ok) throw new Error('Failed to fetch meal detail');
-  const data = (await res.json()) as LookupResponse;
-  return data.meals?.[0] ?? null;
-}
+export async function searchCookRcpByIngredients(
+  ingredients: string[],
+  signal?: AbortSignal,
+): Promise<MealDetailRaw[]>
 ```
+
+- `ingredients`는 소문자/공백 트리밍이 선행되어 들어옵니다.
+- 입력이 비어 있으면 전체 레시피를 반환합니다.
+- `AbortSignal`이 중간에 중단되면 `AbortError`를 던집니다.
 
 ```ts
-import { MealDetailRaw, Recipe } from './types';
-
-export function normalizeIngredients(raw: MealDetailRaw): Recipe['ingredients'] {
-  const list: Recipe['ingredients'] = [];
-  for (let i = 1; i <= 20; i++) {
-    const name = (raw as any)[`strIngredient${i}`]?.trim();
-    const measure = (raw as any)[`strMeasure${i}`]?.trim();
-    if (name) list.push({ name, measure: measure || undefined });
-  }
-  return list;
-}
-
-export function splitInstructions(text: string | null | undefined): string[] {
-  if (!text) return [];
-  return text
-    .split(/\r?\n+/)
-    .map(s => s.trim())
-    .filter(Boolean);
-}
-
-export function toRecipe(raw: MealDetailRaw): Recipe {
-  return {
-    id: raw.idMeal,
-    title: raw.strMeal,
-    thumb: raw.strMealThumb,
-    instructions: splitInstructions(raw.strInstructions),
-    ingredients: normalizeIngredients(raw),
-    sourceUrl: raw.strSource || undefined,
-    youtubeUrl: raw.strYoutube || undefined,
-  };
-}
+export function getCookRcpDetailById(id: string): MealDetailRaw | null
 ```
 
----
-
-## 6. 상태 관리(Zustand 예시)
+- 이미 로드된 Map에서 RCP_SEQ 기준으로 조회합니다.
 
 ```ts
-import { create } from 'zustand';
-import { filterByIngredients, lookupById } from './api';
-import { toRecipe } from './utils';
-import type { Recipe } from './types';
+export function listCookRcpSummaries(): MealSummary[]
+```
 
-type Status = 'idle' | 'loadingList' | 'loadingDetail' | 'success' | 'empty' | 'error';
+- 썸네일/이름만 필요한 경우를 위해 요약 목록을 제공합니다.
 
-type State = {
-  status: Status;
-  lastIngredients: string[];
-  recipe: Recipe | null;
-  error: string | null;
-  search: (input: string) => Promise<void>;
-  reroll: () => Promise<void>;
-};
+토큰화 및 변환 시 고려 사항:
 
-export const useRecipeStore = create<State>((set, get) => ({
-  status: 'idle',
-  lastIngredients: [],
-  recipe: null,
-  error: null,
+- `RCP_PARTS_DTLS`는 줄바꿈과 구분 기호가 혼재합니다. `주재료:` 라벨을 제거하고 `,`, `·`, `;` 등으로 분리합니다.
+- 계량 정보는 마지막 공백 뒤의 문자열을 계량으로 간주하되, 숫자/“약간” 등의 단어가 포함된 경우에만 분리합니다.
+- 조리 단계 `MANUAL##`는 숫자 접두사를 제거하고 `\n`으로 연결합니다.
+- 영양 팁(`RCP_NA_TIP`)은 텍스트 그대로 `strTip`에 저장합니다. 실제 URL일 경우에만 `strSource`를 채웁니다(현재 데이터셋은 텍스트 기준).
 
-  async search(input) {
-    const ings = input
-      .split(',')
-      .map(s => s.trim().toLowerCase())
-      .filter(Boolean);
+---
 
-    if (ings.length === 0) {
-      set({ status: 'error', error: '재료를 한 개 이상 입력하세요.' });
-      return;
-    }
+## 5. 변환 유틸 (`utils.ts`)
 
-    try {
-      set({ status: 'loadingList', error: null, recipe: null, lastIngredients: ings });
-      const list = await filterByIngredients(ings);
-      if (!list || list.length === 0) {
-        set({ status: 'empty' });
-        return;
-      }
-      const pick = list[Math.floor(Math.random() * list.length)];
-      set({ status: 'loadingDetail' });
-      const detail = await lookupById(pick.idMeal);
-      if (!detail) throw new Error('상세 정보를 찾을 수 없습니다.');
-      set({ status: 'success', recipe: toRecipe(detail) });
-    } catch (e: any) {
-      set({ status: 'error', error: e.message ?? '알 수 없는 오류' });
-    }
-  },
+- `normalizeIngredients` — `strIngredient{N}`/`strMeasure{N}` 쌍을 순회하여 UI에서 사용하기 쉬운 배열로 반환합니다.
+- `splitInstructions` — 줄바꿈으로 조리 단계를 나누고 공백을 제거합니다.
+- `toRecipe` — `MealDetailRaw`를 받아 도메인 모델 `Recipe`로 변환합니다. 여기서 영양 정보(문자열)를 숫자로 파싱해 `nutrition` 객체를 생성합니다.
 
-  async reroll() {
-    const ings = get().lastIngredients;
-    if (!ings.length) return;
-    try {
-      set({ status: 'loadingList', error: null });
-      const list = await filterByIngredients(ings);
-      if (!list || list.length === 0) {
-        set({ status: 'empty' });
-        return;
-      }
-      const pick = list[Math.floor(Math.random() * list.length)];
-      set({ status: 'loadingDetail' });
-      const detail = await lookupById(pick.idMeal);
-      if (!detail) throw new Error('상세 정보를 찾을 수 없습니다.');
-      set({ status: 'success', recipe: toRecipe(detail) });
-    } catch (e: any) {
-      set({ status: 'error', error: e.message ?? '알 수 없는 오류' });
-    }
-  },
-}));
+숫자 파싱 시에는 단위 문자를 제거하고, 값이 없거나 NaN이면 `undefined`로 처리합니다.
+
+---
+
+## 6. 상태 관리 (`store.ts`)
+
+Zustand 스토어는 다음 상태를 관리합니다.
+
+- `status`: `'idle' | 'loadingList' | 'success' | 'empty' | 'error'`
+- `lastIngredients`: 마지막으로 검색한 재료 배열
+- `recipe`: 현재 표시 중인 레시피 (`Recipe | null`)
+- `error`: 사용자에게 보여 줄 오류 메시지
+
+검색 흐름:
+
+1. 입력 문자열을 쉼표 기준으로 분리, 트리밍, 소문자 변환 후 `ingredients` 배열을 생성합니다.
+2. `searchCookRcpByIngredients`를 호출해 조건에 맞는 레시피 목록을 조회합니다.
+3. 결과가 없으면 `status = 'empty'`, 있으면 무작위로 1건을 선택해 `toRecipe`로 변환 후 `status = 'success'`로 설정합니다.
+4. AbortController를 사용해 연속 입력 시 이전 검색을 취소합니다.
+5. 오류 발생 시(Abort 제외) `status = 'error'`와 메시지를 갱신합니다.
+
+"다시 돌리기"는 `lastIngredients`를 재사용해 동일 로직을 실행합니다.
+
+---
+
+## 7. UI 상태 (`pages/Home.tsx`)
+
+- 로딩 중(`loadingList`): 로딩 스피너 및 진행 메시지 표시.
+- 빈 결과(`empty`): 입력을 유도하는 EmptyState.
+- 오류(`error`): 네트워크/파싱 오류 메시지와 재시도 버튼(가능 시) 노출.
+- 성공(`success`): `RecipeCard`로 레시피를 표시, "다시 돌리기" 버튼 활성화.
+- 초기(`idle`): 안내 박스로 입력을 유도.
+
+`RecipeCard`는 다음 정보를 보여 줍니다.
+
+- 썸네일과 레시피명
+- 재료/계량 리스트
+- 조리 단계 (번호/배경 강조)
+- 영양 팁(있을 경우)
+- 영양 정보 (열량, 탄수화물, 단백질, 지방, 나트륨, 1인분 중량)
+- 원문/영상 링크는 현재 데이터셋에 URL이 없으므로 표시되지 않습니다.
+
+---
+
+## 8. 테스트 전략
+
+- `cookRcpRepository.test.ts`
+  - 입력 재료에 따라 올바른 레시피가 필터링되는지 검증.
+  - `getCookRcpDetailById`가 재료/계량, 조리 단계를 기대대로 정규화했는지 확인.
+  - `toRecipe`가 영양 정보를 숫자로 파싱하고 `Recipe`로 변환하는지 확인.
+- UI 테스트는 필요에 따라 추가(예: 상태별 렌더링)하지만 본 문서에서는 데이터/스토어 로직에 집중합니다.
+
+테스트 실행 명령:
+
+```bash
+npm test          # Vitest
+npm run lint      # ESLint
+npm run build     # Vite 빌드 + 타입 체크
 ```
 
 ---
 
-## 7. 컴포넌트 스펙
+## 9. 배포 및 운영 시 고려 사항
 
-### IngredientInput
-
-- **Props**: `onSubmit(input: string)`
-- **기능**: 텍스트 입력 + 엔터/버튼으로 submit, placeholder 예: `예) egg, tomato, onion`
-- **검증**: 공백/중복/한글 입력 허용 (영문으로 변환 권장 X, API는 영어 재료명 기반)
-
-### RecipeCard
-
-- **Props**: `recipe: Recipe`
-- **UI**: 썸네일, 제목, 재료(불릿 리스트), 조리 단계(번호 리스트), 소스/유튜브 링크, `다시 돌리기` 버튼, `링크 복사` 버튼
-
-### ErrorState / EmptyState / LoadingSpinner
-
-- 사용자 친화 문구 + 재시도 버튼
+- 데이터셋이 커질수록 번들 크기가 증가하므로, 실제 운영에서는 정기 배치/정적 파일 캐싱 전략을 고려합니다.
+- 데이터 갱신 주기에 맞춰 자동 전처리 파이프라인(CI/CD)을 구성하면 수동 실수를 줄일 수 있습니다.
+- 레시피 출처 표기는 필수입니다. UI/README/푸터 등에 식품안전나라 출처를 명시하세요.
 
 ---
 
-## 8. 페이지 및 레이아웃
+## 10. 향후 확장 아이디어
 
-### Home.tsx (핵심 화면)
-
-- 상단: 타이틀(`오늘 뭐 먹지? 랜덤 레시피 챌린저`), 서브텍스트
-- 재료 입력 폼(IngredientInput)
-- 상태별 렌더링: Loading / Empty / Error / RecipeCard
-- 푸터: 간단 크레딧(`Powered by TheMealDB`), 깃허브 링크(선택)
+- 재료 유사도/대체재 추천을 위한 토큰 매핑 테이블 구축
+- 영양 기준(예: 칼로리, 나트륨) 필터 추가
+- 조리 도구/시간에 따른 추천 강화
+- 서비스 다국어화(레시피 요약 번역, 단위 변환)
 
 ---
 
-## 9. UI 및 스타일 가이드 (Tailwind)
-
-- 컨테이너: `max-w-xl mx-auto px-4 py-8`
-- 버튼: 기본 `rounded-xl px-4 py-2 font-medium shadow-sm active:scale-[0.98]`
-- 카드: `rounded-2xl border p-4 shadow-sm bg-white/60 backdrop-blur`
-- 애니메이션: `animate-pulse`(로딩), `transition-all duration-200`
-
----
-
-## 10. 오류 및 예외 처리
-
-- 네트워크 오류: `오프라인이거나 서버 응답이 없어요. 잠시 후 다시 시도해주세요.`
-- 빈 결과: `해당 재료로 찾은 레시피가 없어요. 재료를 바꿔보세요!`
-- 상세 변환 실패: `레시피 정보를 불러오지 못했어요.`
-- 버튼 다중 클릭 방지: 로딩 중 버튼 disabled 처리
-
----
-
-## 11. 유틸 및 공유 기능
-
-- **링크 복사**: `navigator.clipboard.writeText(recipe.sourceUrl || recipe.youtubeUrl || window.location.href)`
-- **URL 쿼리로 재료 유지(선택)**: `?i=egg,tomato` → 첫 로드 시 자동 검색
-- **랜덤 연출(선택)**: 300~600ms 딜레이로 `돌리고 있습니다…` 애니메이션
-
----
-
-## 12. 테스트 및 수용 기준 (Acceptance Criteria)
-
-- [ ] `egg` 단일 재료로 검색 시 최소 1개 레시피 표시
-- [ ] `egg, tomato`로 검색 시 결과가 없으면 빈 상태 표시
-- [ ] 로딩/빈/오류 상태에서 사용자 메시지 확인 가능
-- [ ] `다시 돌리기` 클릭 시 **동일 재료**로 새 레시피 노출
-- [ ] 모바일(375px), 태블릿(768px), 데스크탑(1280px)에서 기본 레이아웃 유지
-- [ ] 키보드로 입력 후 Enter로 검색 가능
-
----
-
-## 13. 확장 아이디어 (추후 고려)
-
-- **오토컴플리트**: `/list.php?i=list` 활용하여 재료 제안
-- **필터**: 조리시간, 난이도(태그로 의사 처리)
-- **즐겨찾기/최근 기록(LocalStorage)**
-- **디스코드 공유**: 웹훅으로 `title/thumbnail/ingredients` embed 전송
-- **국문화**: 한글 레시피 소스 매핑(외부 DB/크롤링 필요)
-
----
-
-## 14. 실행 스니펫 (페이지 통합 예시)
-
-```tsx
-import { useRecipeStore } from '@/features/recipes/store';
-import { RecipeCard } from '@/components/RecipeCard';
-import { IngredientInput } from '@/components/IngredientInput';
-
-export default function Home() {
-  const { status, recipe, error, search, reroll } = useRecipeStore();
-
-  return (
-    <main className="max-w-xl mx-auto px-4 py-8">
-      <h1 className="text-2xl font-bold mb-2">오늘 뭐 먹지? 🍳 랜덤 레시피 챌린저</h1>
-      <p className="text-sm text-gray-600 mb-6">냉장고 재료를 입력하고 레시피를 뽑아보세요!</p>
-
-      <IngredientInput onSubmit={search} />
-
-      {(status === 'loadingList' || status === 'loadingDetail') && (
-        <div className="mt-6 animate-pulse">레시피를 찾는 중…</div>
-      )}
-
-      {status === 'empty' && (
-        <div className="mt-6 text-rose-600">해당 재료로 찾은 레시피가 없어요. 재료를 바꿔보세요!</div>
-      )}
-
-      {status === 'error' && (
-        <div className="mt-6 text-rose-600">오류: {error}</div>
-      )}
-
-      {status === 'success' && recipe && (
-        <div className="mt-6">
-          <RecipeCard recipe={recipe} onReroll={reroll} />
-        </div>
-      )}
-    </main>
-  );
-}
-```
-
----
-
-## 15. 빌드 및 배포 체크리스트
-
-- [ ] `npm create vite@latest` → React + TS 템플릿 선택
-- [ ] Tailwind 설치 및 세팅 완료
-- [ ] 위 구조대로 파일 생성
-- [ ] 로컬에서 `npm run dev`로 동작 확인
-- [ ] Vercel/Netlify에 배포
-
----
-
-> 위 지침을 항상 참조하여 구현을 진행하고, 변경 사항이 생기면 본 문서를 최신 상태로 유지하세요.
+이 문서를 기준으로 프로젝트 구조와 코드 스타일을 유지하면, COOKRCP01 단일 데이터 소스 기반의 안정적인 레시피 추천 경험을 제공할 수 있습니다.🧑‍🍳

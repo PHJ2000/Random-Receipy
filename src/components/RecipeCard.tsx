@@ -9,6 +9,19 @@ type RecipeCardProps = {
 
 type CopyState = 'idle' | 'copied' | 'error'
 
+const NUTRITION_METADATA = [
+  { key: 'weight', label: '1인분 중량', unit: 'g' },
+  { key: 'calories', label: '열량', unit: 'kcal' },
+  { key: 'carbohydrate', label: '탄수화물', unit: 'g' },
+  { key: 'protein', label: '단백질', unit: 'g' },
+  { key: 'fat', label: '지방', unit: 'g' },
+  { key: 'sodium', label: '나트륨', unit: 'mg' },
+] as const satisfies ReadonlyArray<{
+  key: keyof NonNullable<Recipe['nutrition']>
+  label: string
+  unit: string
+}>
+
 function getShareLink(recipe: Recipe): string {
   if (recipe.sourceUrl) return recipe.sourceUrl
   if (recipe.youtubeUrl) return recipe.youtubeUrl
@@ -113,6 +126,35 @@ export function RecipeCard({ recipe, onReroll, isLoading }: RecipeCardProps) {
           </p>
         ) : null}
       </section>
+
+      {recipe.nutrition ? (
+        <section aria-labelledby="nutrition-heading" className="space-y-3">
+          <h3 id="nutrition-heading" className="text-lg font-semibold text-slate-800">
+            영양 정보
+          </h3>
+          <dl className="grid gap-3 sm:grid-cols-2">
+            {NUTRITION_METADATA.filter((item) => recipe.nutrition?.[item.key] !== undefined).map((item) => {
+              const rawValue = recipe.nutrition?.[item.key]
+              if (rawValue === undefined) return null
+              const formatted = rawValue.toLocaleString('ko-KR', {
+                maximumFractionDigits: 1,
+              })
+              return (
+                <div
+                  key={item.key}
+                  className="flex items-center justify-between rounded-xl border border-orange-100 bg-orange-50/70 px-4 py-3 text-sm text-slate-700"
+                >
+                  <dt className="font-medium text-slate-900">{item.label}</dt>
+                  <dd>
+                    <span className="font-semibold text-brand">{formatted}</span>
+                    <span className="ml-1 text-xs text-slate-500">{item.unit}</span>
+                  </dd>
+                </div>
+              )
+            })}
+          </dl>
+        </section>
+      ) : null}
 
       <footer className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-wrap gap-3">
