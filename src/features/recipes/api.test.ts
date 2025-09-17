@@ -6,7 +6,6 @@ import {
   toMealDetailFromKorean,
   toMealSummaryFromKorean,
 } from './koreanApi'
-import { fetchKoreanRecipes, toMealDetailFromKorean, toMealSummaryFromKorean } from './koreanApi'
 import { toRecipe } from './utils'
 import type { FilterResponse, MealSummary } from './types'
 import type { KoreanRecipeRaw } from './koreanApi'

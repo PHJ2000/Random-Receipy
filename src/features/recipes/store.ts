@@ -1,7 +1,6 @@
 import { create } from 'zustand'
 import { filterByIngredients, lookupById } from './api'
 import { fetchKoreanRecipesByIngredients, toMealDetailFromKorean } from './koreanApi'
-import { fetchKoreanRecipes, toMealDetailFromKorean } from './koreanApi'
 import { toRecipe } from './utils'
 import type { Recipe } from './types'
 
@@ -82,32 +81,10 @@ export const useRecipeStore = create<State>((set, get) => {
       return null
     }
 
-    try {
-      const recipeList = await fetchKoreanRecipesByIngredients({
-        serviceKey: KOREAN_SERVICE_KEY,
-        ingredients,
-        signal,
-      })
-
-      if (recipeList.length === 0) {
-      const recipeList = await fetchKoreanRecipes({
-        serviceKey: KOREAN_SERVICE_KEY,
-        RCP_PARTS_DTLS: ingredients.join(','),
-        signal,
-      })
-
-      if (!recipeList.length) {
-        return null
-      }
-
-      const selected = toMealDetailFromKorean(pickRandom(recipeList))
-      return toRecipe(selected)
-    } catch (error) {
       if (isAbortError(error)) {
         throw error
       }
       return null
-    }
   }
 
   function handleError(error: unknown) {
