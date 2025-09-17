@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { filterByIngredients, lookupById } from './api'
+import { fetchKoreanRecipesByIngredients, toMealDetailFromKorean } from './koreanApi'
 import { toRecipe } from './utils'
 import type { Recipe } from './types'
 
@@ -29,6 +30,8 @@ function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError'
 }
 
+const KOREAN_SERVICE_KEY = import.meta.env.VITE_KOREAN_RECIPES_SERVICE_KEY
+
 export const useRecipeStore = create<State>((set, get) => {
   let listController: AbortController | null = null
   let detailController: AbortController | null = null
@@ -41,6 +44,12 @@ export const useRecipeStore = create<State>((set, get) => {
     set({ status: 'loadingList', error: null, recipe: null })
 
     try {
+      const koreanRecipe = await tryFetchKoreanRecipe(ingredients, listController.signal)
+      if (koreanRecipe) {
+        set({ status: 'success', recipe: koreanRecipe })
+        return
+      }
+
       const list = await filterByIngredients(ingredients, listController.signal)
 
       if (!list || list.length === 0) {
@@ -61,6 +70,35 @@ export const useRecipeStore = create<State>((set, get) => {
     } finally {
       listController = null
       detailController = null
+    }
+  }
+
+  async function tryFetchKoreanRecipe(
+    ingredients: string[],
+    signal: AbortSignal,
+  ): Promise<Recipe | null> {
+    if (!KOREAN_SERVICE_KEY) {
+      return null
+    }
+
+    try {
+      const recipeList = await fetchKoreanRecipesByIngredients({
+        serviceKey: KOREAN_SERVICE_KEY,
+        ingredients,
+        signal,
+      })
+
+      if (recipeList.length === 0) {
+        return null
+      }
+
+      const selected = toMealDetailFromKorean(pickRandom(recipeList))
+      return toRecipe(selected)
+    } catch (error) {
+      if (isAbortError(error)) {
+        throw error
+      }
+      return null
     }
   }
 
