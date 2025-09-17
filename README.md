@@ -25,9 +25,16 @@ npm install
 npm run dev
 ```
 
-- 개발 서버는 `http://localhost:5173`에서 실행됩니다.
-- 현재 구조에서는 **환경 변수나 API 키가 필요하지 않습니다.** `.env`와 `.env.local` 파일은 참고용 주석만 포함합니다.
-- 데이터셋을 갱신하려면 COOKRCP01 API에서 내려받은 JSON을 동일한 스키마로 변환해 `src/features/recipes/data/cookRcpDataset.json`을 교체하면 됩니다.
+- 개발 서버는 기본적으로 `http://localhost:5173`에서 실행됩니다.
+- API 키 없이 바로 TheMealDB v1 엔드포인트를 호출합니다.
+- 브라우저 콘솔/네트워크 패널에서 요청 흐름을 확인할 수 있습니다.
+
+## 기술 스택
+
+- **빌드 도구**: Vite + React + TypeScript
+- **상태 관리**: Zustand (전역 스토어에서 검색/다시 돌리기 흐름 관리)
+- **스타일링**: Tailwind CSS (모바일 우선 반응형 레이아웃)
+- **데이터 소스**: TheMealDB Public API (`filter.php`, `lookup.php`)
 
 ## 프로젝트 구조
 

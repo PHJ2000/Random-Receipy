@@ -45,6 +45,4 @@ export type Recipe = {
   ingredients: Ingredient[]
   sourceUrl?: string
   youtubeUrl?: string
-  tip?: string
-  nutrition?: NutritionInfo
 }

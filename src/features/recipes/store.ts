@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { searchCookRcpByIngredients } from './cookRcpRepository'
+import { filterByIngredients, lookupById } from './api'
 import { toRecipe } from './utils'
 import type { Recipe } from './types'
 
@@ -29,6 +29,8 @@ function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError'
 }
 
+const KOREAN_SERVICE_KEY = import.meta.env.VITE_KOREAN_RECIPES_SERVICE_KEY
+
 export const useRecipeStore = create<State>((set, get) => {
   let searchController: AbortController | null = null
 
@@ -38,8 +40,9 @@ export const useRecipeStore = create<State>((set, get) => {
     set({ status: 'loadingList', error: null, recipe: null })
 
     try {
-      const details = await searchCookRcpByIngredients(ingredients, searchController.signal)
-      if (!details || details.length === 0) {
+      const list = await filterByIngredients(ingredients, listController.signal)
+
+      if (!list || list.length === 0) {
         set({ status: 'empty', recipe: null })
         return
       }
@@ -49,6 +52,22 @@ export const useRecipeStore = create<State>((set, get) => {
     } finally {
       searchController = null
     }
+  }
+
+  async function tryFetchKoreanRecipe(
+    ingredients: string[],
+    signal: AbortSignal,
+  ): Promise<Recipe | null> {
+    if (!KOREAN_SERVICE_KEY) {
+      return null
+    }
+
+
+      if (isAbortError(error)) {
+        throw error
+      }
+      return null
+
   }
 
   function handleError(error: unknown) {

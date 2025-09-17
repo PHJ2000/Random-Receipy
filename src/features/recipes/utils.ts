@@ -49,7 +49,5 @@ export function toRecipe(raw: MealDetailRaw): Recipe {
     ingredients: normalizeIngredients(raw),
     sourceUrl: raw.strSource || undefined,
     youtubeUrl: raw.strYoutube || undefined,
-    tip: raw.strTip?.trim() ? raw.strTip.trim() : undefined,
-    nutrition: hasNutrition ? nutrition : undefined,
   }
 }
