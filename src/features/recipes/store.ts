@@ -81,10 +81,12 @@ export const useRecipeStore = create<State>((set, get) => {
       return null
     }
 
+
       if (isAbortError(error)) {
         throw error
       }
       return null
+
   }
 
   function handleError(error: unknown) {

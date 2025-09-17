@@ -20,8 +20,18 @@ npm run dev
 ```
 
 - 개발 서버는 기본적으로 `http://localhost:5173`에서 실행됩니다.
-- API 키 없이 바로 TheMealDB v1 엔드포인트를 호출합니다.
+- 기본값으로는 TheMealDB만 사용하며, 한국어 공공 데이터 연동을 위해서는 추가 설정이 필요합니다.
 - 브라우저 콘솔/네트워크 패널에서 요청 흐름을 확인할 수 있습니다.
+
+### 환경 변수 설정
+
+한국 농식품부 "한식 우수 레시피" API를 사용하려면 인증키를 발급받아 Vite 환경 변수로 주입해야 합니다.
+
+1. [data.mafra.go.kr](https://data.mafra.go.kr/opendata/data/indexOpenDataDetail.do?data_id=20150827000000000464)에서 `농림축산식품부_한식우수레시피` 서비스를 신청하여 `serviceKey`를 발급받습니다.
+2. 저장소 루트에 있는 `.env` 또는 `.env.local` 파일의 `VITE_KOREAN_RECIPES_SERVICE_KEY` 값에 발급받은 키를 입력합니다.
+   - `.env`는 기본값을 제공하며, `.env.local`은 개발자가 개인 키를 덮어써서 사용할 수 있는 용도의 파일입니다.
+   - 키가 비어 있으면 애플리케이션은 자동으로 TheMealDB로 폴백합니다.
+3. 개발 서버를 재시작하여 `import.meta.env.VITE_KOREAN_RECIPES_SERVICE_KEY` 값이 주입되었는지 확인합니다.
 
 ## 기술 스택
 
