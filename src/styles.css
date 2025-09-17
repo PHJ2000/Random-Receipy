@@ -1,0 +1,24 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+
+  body {
+    @apply min-h-screen bg-gradient-to-br from-orange-50 via-amber-50 to-orange-100 text-slate-900 antialiased;
+    font-family: 'Pretendard Variable', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+}
+
+@layer components {
+  .button-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-brand px-4 py-2 font-medium text-white shadow-sm transition-all duration-200 hover:bg-brand-dark focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-dark disabled:cursor-not-allowed disabled:opacity-60 disabled:shadow-none;
+  }
+
+  .card {
+    @apply rounded-2xl border border-orange-100 bg-white/80 p-6 shadow-lg backdrop-blur;
+  }
+}
