@@ -6,8 +6,11 @@ const DEFAULT_HEADERS: HeadersInit = {
   Accept: 'application/json',
 }
 
+/**
+ * Encode ingredient values individually while preserving comma separators required by the API.
+ */
 function buildIngredientQuery(ingredients: string[]): string {
-  return encodeURIComponent(ingredients.join(','))
+  return ingredients.map((item) => encodeURIComponent(item)).join(',')
 }
 
 async function request<T>(url: string, signal?: AbortSignal): Promise<T> {
