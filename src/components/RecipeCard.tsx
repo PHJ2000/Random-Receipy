@@ -106,6 +106,12 @@ export function RecipeCard({ recipe, onReroll, isLoading }: RecipeCardProps) {
             상세 조리 설명이 제공되지 않은 레시피예요. 원문 링크를 참고해 주세요.
           </p>
         )}
+        {recipe.tip ? (
+          <p className="rounded-xl border border-amber-200 bg-amber-50/70 p-4 text-sm leading-relaxed text-slate-700">
+            <span className="font-semibold text-amber-700">영양 팁</span>
+            <span className="ml-2 text-slate-700">{recipe.tip}</span>
+          </p>
+        ) : null}
       </section>
 
       <footer className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
