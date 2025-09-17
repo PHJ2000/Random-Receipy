@@ -1,9 +1,15 @@
 import { create } from 'zustand'
 import { filterByIngredients, lookupById } from './api'
+import {
+  fetchKoreanRecipes,
+  intersectCookRcpRows,
+  toMealDetailFromKorean,
+  type CookRcpRow,
+} from './koreanApi'
 import { toRecipe } from './utils'
-import type { Recipe } from './types'
+import type { MealDetailRaw, Recipe } from './types'
 
-type Status = 'idle' | 'loadingList' | 'loadingDetail' | 'success' | 'empty' | 'error'
+type Status = 'idle' | 'loadingList' | 'success' | 'empty' | 'error'
 
 type State = {
   status: Status
@@ -29,38 +35,95 @@ function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError'
 }
 
+async function tryFetchKoreanDetail(
+  ingredients: string[],
+  signal: AbortSignal,
+): Promise<MealDetailRaw | null> {
+  const serviceKey = import.meta.env.VITE_KOREAN_RECIPES_SERVICE_KEY?.trim()
+  if (!serviceKey) return null
+
+  const unique = Array.from(new Set(ingredients.map((item) => item.trim()).filter(Boolean)))
+  if (unique.length === 0) return null
+
+  const lists: CookRcpRow[][] = []
+
+  for (const ingredient of unique) {
+    const rows = await fetchKoreanRecipes({
+      serviceKey,
+      parts: ingredient,
+      signal,
+    })
+
+    if (rows.length === 0) {
+      return null
+    }
+
+    lists.push(rows)
+  }
+
+  const intersection = intersectCookRcpRows(lists)
+  if (intersection.length === 0) {
+    return null
+  }
+
+  const selected = pickRandom(intersection)
+  return toMealDetailFromKorean(selected)
+}
+
+async function tryFetchMealDbDetail(
+  ingredients: string[],
+  signal: AbortSignal,
+): Promise<MealDetailRaw | null> {
+  const list = await filterByIngredients(ingredients, signal)
+
+  if (!list || list.length === 0) {
+    return null
+  }
+
+  const picked = pickRandom(list)
+  const detail = await lookupById(picked.idMeal, signal)
+  if (!detail) {
+    throw new Error('레시피 정보를 불러오지 못했어요.')
+  }
+
+  return detail
+}
+
 export const useRecipeStore = create<State>((set, get) => {
-  let listController: AbortController | null = null
-  let detailController: AbortController | null = null
+  let searchController: AbortController | null = null
 
   async function fetchRecipe(ingredients: string[]): Promise<void> {
-    listController?.abort()
-    detailController?.abort()
+    searchController?.abort()
+    searchController = new AbortController()
+    const { signal } = searchController
 
-    listController = new AbortController()
     set({ status: 'loadingList', error: null, recipe: null })
 
     try {
-      const list = await filterByIngredients(ingredients, listController.signal)
+      let detail: MealDetailRaw | null = null
 
-      if (!list || list.length === 0) {
+      try {
+        detail = await tryFetchKoreanDetail(ingredients, signal)
+      } catch (error) {
+        if (isAbortError(error)) {
+          throw error
+        }
+        console.warn('식약처 레시피 API 호출 실패, 해외 API로 폴백합니다.', error)
+        detail = null
+      }
+
+      if (!detail) {
+        detail = await tryFetchMealDbDetail(ingredients, signal)
+      }
+
+      if (!detail) {
         set({ status: 'empty', recipe: null })
         return
       }
 
-      const pick = pickRandom(list)
-      detailController = new AbortController()
-      set({ status: 'loadingDetail' })
-
-      const detail = await lookupById(pick.idMeal, detailController.signal)
-      if (!detail) {
-        throw new Error('레시피 정보를 불러오지 못했어요.')
-      }
-
       set({ status: 'success', recipe: toRecipe(detail) })
     } finally {
-      listController = null
-      detailController = null
+      searchController = null
     }
   }
 

@@ -6,11 +6,16 @@ const DEFAULT_HEADERS: HeadersInit = {
   Accept: 'application/json',
 }
 
-/**
- * Encode ingredient values individually while preserving comma separators required by the API.
- */
 function buildIngredientQuery(ingredients: string[]): string {
   return ingredients.map((item) => encodeURIComponent(item)).join(',')
+}
+
+async function request<T>(url: string, signal?: AbortSignal): Promise<T> {
+  const res = await fetch(url, { headers: DEFAULT_HEADERS, signal })
+  if (!res.ok) {
+    throw new Error('해외 레시피 API 응답이 올바르지 않습니다.')
+  }
+  return (await res.json()) as T
 }
 
 async function filterSingleIngredient(
@@ -21,14 +26,6 @@ async function filterSingleIngredient(
   return request<FilterResponse>(`${BASE_URL}/filter.php?i=${query}`, signal)
 }
 
-async function request<T>(url: string, signal?: AbortSignal): Promise<T> {
-  const res = await fetch(url, { headers: DEFAULT_HEADERS, signal })
-  if (!res.ok) {
-    throw new Error('서버 응답이 올바르지 않습니다.')
-  }
-  return (await res.json()) as T
-}
-
 export async function filterByIngredients(
   ingredients: string[],
   signal?: AbortSignal,
@@ -37,6 +34,7 @@ export async function filterByIngredients(
 
   const [first, ...rest] = ingredients
   const firstResponse = await filterSingleIngredient(first, signal)
+
   if (!firstResponse.meals || firstResponse.meals.length === 0) {
     return null
   }
