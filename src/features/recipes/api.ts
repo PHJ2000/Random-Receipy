@@ -6,8 +6,19 @@ const DEFAULT_HEADERS: HeadersInit = {
   Accept: 'application/json',
 }
 
+/**
+ * Encode ingredient values individually while preserving comma separators required by the API.
+ */
 function buildIngredientQuery(ingredients: string[]): string {
-  return encodeURIComponent(ingredients.join(','))
+  return ingredients.map((item) => encodeURIComponent(item)).join(',')
+}
+
+async function filterSingleIngredient(
+  ingredient: string,
+  signal?: AbortSignal,
+): Promise<FilterResponse> {
+  const query = buildIngredientQuery([ingredient])
+  return request<FilterResponse>(`${BASE_URL}/filter.php?i=${query}`, signal)
 }
 
 async function request<T>(url: string, signal?: AbortSignal): Promise<T> {
@@ -23,9 +34,41 @@ export async function filterByIngredients(
   signal?: AbortSignal,
 ): Promise<MealSummary[] | null> {
   if (!ingredients.length) return []
-  const query = buildIngredientQuery(ingredients)
-  const data = await request<FilterResponse>(`${BASE_URL}/filter.php?i=${query}`, signal)
-  return data.meals ?? null
+
+  const [first, ...rest] = ingredients
+  const firstResponse = await filterSingleIngredient(first, signal)
+  if (!firstResponse.meals || firstResponse.meals.length === 0) {
+    return null
+  }
+
+  if (rest.length === 0) {
+    return firstResponse.meals
+  }
+
+  const intersected = new Map(firstResponse.meals.map((meal) => [meal.idMeal, meal] as const))
+
+  for (const ingredient of rest) {
+    const response = await filterSingleIngredient(ingredient, signal)
+    const meals = response.meals
+
+    if (!meals || meals.length === 0) {
+      return null
+    }
+
+    const validIds = new Set(meals.map((meal) => meal.idMeal))
+
+    for (const id of Array.from(intersected.keys())) {
+      if (!validIds.has(id)) {
+        intersected.delete(id)
+      }
+    }
+
+    if (intersected.size === 0) {
+      return null
+    }
+  }
+
+  return Array.from(intersected.values())
 }
 
 export async function lookupById(id: string, signal?: AbortSignal): Promise<MealDetailRaw | null> {
