@@ -1,9 +1,9 @@
 import { create } from 'zustand'
-import { filterByIngredients, lookupById } from './api'
+import { searchCookRcpByIngredients } from './cookRcpRepository'
 import { toRecipe } from './utils'
 import type { Recipe } from './types'
 
-type Status = 'idle' | 'loadingList' | 'loadingDetail' | 'success' | 'empty' | 'error'
+type Status = 'idle' | 'loadingList' | 'success' | 'empty' | 'error'
 
 type State = {
   status: Status
@@ -30,37 +30,24 @@ function isAbortError(error: unknown): boolean {
 }
 
 export const useRecipeStore = create<State>((set, get) => {
-  let listController: AbortController | null = null
-  let detailController: AbortController | null = null
+  let searchController: AbortController | null = null
 
   async function fetchRecipe(ingredients: string[]): Promise<void> {
-    listController?.abort()
-    detailController?.abort()
-
-    listController = new AbortController()
+    searchController?.abort()
+    searchController = new AbortController()
     set({ status: 'loadingList', error: null, recipe: null })
 
     try {
-      const list = await filterByIngredients(ingredients, listController.signal)
-
-      if (!list || list.length === 0) {
+      const details = await searchCookRcpByIngredients(ingredients, searchController.signal)
+      if (!details || details.length === 0) {
         set({ status: 'empty', recipe: null })
         return
       }
 
-      const pick = pickRandom(list)
-      detailController = new AbortController()
-      set({ status: 'loadingDetail' })
-
-      const detail = await lookupById(pick.idMeal, detailController.signal)
-      if (!detail) {
-        throw new Error('레시피 정보를 불러오지 못했어요.')
-      }
-
-      set({ status: 'success', recipe: toRecipe(detail) })
+      const selected = pickRandom(details)
+      set({ status: 'success', recipe: toRecipe(selected) })
     } finally {
-      listController = null
-      detailController = null
+      searchController = null
     }
   }
 

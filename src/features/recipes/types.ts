@@ -15,6 +15,7 @@ export type MealDetailRaw = {
   strInstructions: string
   strSource: string | null
   strYoutube: string | null
+  strTip?: string | null
   [key: string]: string | null
 }
 
@@ -27,6 +28,15 @@ export type Ingredient = {
   measure?: string
 }
 
+export type NutritionInfo = {
+  weight?: number
+  calories?: number
+  carbohydrate?: number
+  protein?: number
+  fat?: number
+  sodium?: number
+}
+
 export type Recipe = {
   id: string
   title: string
@@ -35,4 +45,6 @@ export type Recipe = {
   ingredients: Ingredient[]
   sourceUrl?: string
   youtubeUrl?: string
+  tip?: string
+  nutrition?: NutritionInfo
 }
