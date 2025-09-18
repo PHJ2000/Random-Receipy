@@ -1,247 +1,183 @@
 import type { MealDetailRaw, MealSummary } from './types'
 
-const BASE_URL = 'https://apis.data.go.kr/1390804/AgriFood/FdFood/getKoreanRecipe01'
-
+const BASE_URL = 'https://openapi.foodsafetykorea.go.kr/api/'
 const DEFAULT_HEADERS: HeadersInit = {
   Accept: 'application/json',
 }
+const MANUAL_KEYS = Array.from({ length: 20 }, (_, index) => `MANUAL${String(index + 1).padStart(2, '0')}`)
 
-const MANUAL_KEYS = Array.from({ length: 20 }, (_, index) =>
-  `MANUAL${String(index + 1).padStart(2, '0')}`,
-)
-
-function normalizeIngredientList(ingredients: string[]): string[] {
-  return Array.from(
-    new Set(
-      ingredients
-        .map((item) => item.trim())
-        .filter(Boolean),
-    ),
-  )
-}
-
-export type KoreanRecipeRaw = {
+export type CookRcpRow = {
   RCP_SEQ: string
   RCP_NM: string
   RCP_PARTS_DTLS?: string | null
+  RCP_NA_TIP?: string | null
   ATT_FILE_NO_MAIN?: string | null
   ATT_FILE_NO_MK?: string | null
-  RCP_NA_TIP?: string | null
   [key: string]: string | null | undefined
 }
 
-export type FetchKoreanRecipesParams = {
+type CookRcpApiResponse = {
+  COOKRCP01?: {
+    RESULT?: {
+      CODE?: string
+      MSG?: string
+    }
+    row?: CookRcpRow[]
+  }
+}
+
+type FetchParams = {
   serviceKey: string
-  RCP_NM?: string
-  RCP_PARTS_DTLS?: string
-  pageNo?: number
-  numOfRows?: number
+  startIndex?: number
+  endIndex?: number
+  name?: string
+  parts?: string
   signal?: AbortSignal
 }
 
-type KoreanApiResponse = {
-  data?: KoreanRecipeRaw[]
-  currentCount?: number
-  getKoreanRecipe01?: { item?: KoreanRecipeRaw[]; row?: KoreanRecipeRaw[] }
-  body?: { items?: { item?: KoreanRecipeRaw | KoreanRecipeRaw[] } }
+function normalizeWhitespace(value: string | null | undefined): string {
+  if (!value) return ''
+  return value.replace(/\s+/g, ' ').trim()
 }
 
-function buildUrl({
-  serviceKey,
-  RCP_NM,
-  RCP_PARTS_DTLS,
-  pageNo = 1,
-  numOfRows = 100,
-}: FetchKoreanRecipesParams): string {
-  const params = new URLSearchParams({
-    serviceKey,
-    pageNo: String(pageNo),
-    numOfRows: String(numOfRows),
-    type: 'json',
-  })
-
-  if (RCP_NM) {
-    params.set('RCP_NM', RCP_NM)
-  }
-
-  if (RCP_PARTS_DTLS) {
-    params.set('RCP_PARTS_DTLS', RCP_PARTS_DTLS)
-  }
-
-  return `${BASE_URL}?${params.toString()}`
+function extractManualSteps(row: CookRcpRow): string[] {
+  return MANUAL_KEYS.map((key) => row[key])
+    .map((value) => (typeof value === 'string' ? value.trim() : ''))
+    .map((step) => step.replace(/^\d+\.\s*/, ''))
+    .filter(Boolean)
 }
 
-function extractRecipes(body: KoreanApiResponse): KoreanRecipeRaw[] {
-  if (Array.isArray(body.data)) {
-    return body.data
-  }
-
-  const getKoreanRecipe01 = body.getKoreanRecipe01
-  if (getKoreanRecipe01) {
-    if (Array.isArray(getKoreanRecipe01.item)) {
-      return getKoreanRecipe01.item
-    }
-    if (Array.isArray(getKoreanRecipe01.row)) {
-      return getKoreanRecipe01.row
-    }
-  }
-
-  const items = body.body?.items?.item
-  if (Array.isArray(items)) {
-    return items
-  }
-  if (items) {
-    return [items]
-  }
-
-  return []
-}
-
-export async function fetchKoreanRecipes({ signal, ...params }: FetchKoreanRecipesParams): Promise<KoreanRecipeRaw[]> {
-  const url = buildUrl(params)
-  const res = await fetch(url, { headers: DEFAULT_HEADERS, signal })
-
-  if (!res.ok) {
-    throw new Error('한식 레시피 정보를 불러올 수 없어요.')
-  }
-
-  const data = (await res.json()) as KoreanApiResponse
-  return extractRecipes(data)
-}
-
-function parseParts(parts: string | null | undefined): string[] {
-  if (!parts) return []
-
+function splitIngredientTokens(row: CookRcpRow): string[] {
+  const parts = row.RCP_PARTS_DTLS ?? ''
   return parts
     .split(/\r?\n+/)
     .map((line) => line.split(':').slice(1).join(':').trim() || line.trim())
-    .flatMap((line) => line.split(/[;,]/))
+    .flatMap((line) => line.split(/[;,·]/))
     .map((item) => item.trim())
     .filter(Boolean)
 }
 
-function mergeManuals(recipe: KoreanRecipeRaw): string {
-  return MANUAL_KEYS.map((key) => recipe[key])
-    .map((value) => (typeof value === 'string' ? value.trim() : ''))
-    .filter(Boolean)
-    .join('\n')
+function isMeasureCandidate(value: string): boolean {
+  if (!value) return false
+  if (/\d/.test(value)) return true
+  return /약간|적당|기호|소량/.test(value)
 }
 
-export function toMealSummaryFromKorean(recipe: KoreanRecipeRaw): MealSummary {
-  return {
-    idMeal: recipe.RCP_SEQ,
-    strMeal: recipe.RCP_NM,
-    strMealThumb: recipe.ATT_FILE_NO_MAIN || recipe.ATT_FILE_NO_MK || '',
-  }
-}
+function tokenizeIngredient(value: string): { name: string; measure?: string } {
+  const trimmed = normalizeWhitespace(value)
+  if (!trimmed) return { name: '' }
 
-function extractSourceAndTip(value: string | null | undefined): {
-  source: string | null
-  tip: string | null
-} {
-  if (!value) {
-    return { source: null, tip: null }
-  }
-
-  const trimmed = value.trim()
-  if (!trimmed) {
-    return { source: null, tip: null }
-  }
-
-  try {
-    const url = new URL(trimmed)
-    if (url.protocol === 'http:' || url.protocol === 'https:') {
-      return { source: url.toString(), tip: null }
+  const lastSpace = trimmed.lastIndexOf(' ')
+  if (lastSpace > 0) {
+    const name = trimmed.slice(0, lastSpace).trim()
+    const measure = trimmed.slice(lastSpace + 1).trim()
+    if (isMeasureCandidate(measure)) {
+      return { name, measure }
     }
-  } catch (error) {
-    void error
   }
 
-  return { source: null, tip: trimmed }
+  return { name: trimmed }
 }
 
-function recipeIncludesAllIngredients(recipe: KoreanRecipeRaw, ingredients: string[]): boolean {
-  if (ingredients.length === 0) return true
+export async function fetchKoreanRecipes({
+  serviceKey,
+  startIndex = 1,
+  endIndex = 100,
+  name,
+  parts,
+  signal,
+}: FetchParams): Promise<CookRcpRow[]> {
+  const trimmedKey = serviceKey.trim()
+  if (!trimmedKey) {
+    throw new Error('식약처 레시피 API 인증키가 필요합니다.')
+  }
 
-  const normalizedParts = parseParts(recipe.RCP_PARTS_DTLS).map((part) => part.toLowerCase())
-  return ingredients.every((ingredient) =>
-    normalizedParts.some((part) => part.includes(ingredient.toLowerCase())),
-  )
+  const url = new URL(`${trimmedKey}/COOKRCP01/json/${startIndex}/${endIndex}`, BASE_URL)
+
+  if (name) {
+    url.searchParams.set('RCP_NM', name)
+  }
+
+  if (parts) {
+    url.searchParams.set('RCP_PARTS_DTLS', parts)
+  }
+
+  const res = await fetch(url.toString(), { headers: DEFAULT_HEADERS, signal })
+  if (!res.ok) {
+    throw new Error('식약처 레시피 API 호출에 실패했습니다.')
+  }
+
+  const payload = (await res.json()) as CookRcpApiResponse
+  const root = payload.COOKRCP01
+  if (!root) {
+    throw new Error('식약처 레시피 API 응답 형식이 올바르지 않습니다.')
+  }
+
+  const result = root.RESULT
+  if (result && result.CODE && result.CODE !== 'INFO-000') {
+    throw new Error(result.MSG || '식약처 레시피 API 오류가 발생했습니다.')
+  }
+
+  return root.row ?? []
 }
 
-export function toMealDetailFromKorean(recipe: KoreanRecipeRaw): MealDetailRaw {
-  const { source, tip } = extractSourceAndTip(recipe.RCP_NA_TIP)
+export function intersectCookRcpRows(lists: CookRcpRow[][]): CookRcpRow[] {
+  if (lists.length === 0) return []
+  const [first, ...rest] = lists
+  const intersection = new Map(first.map((row) => [row.RCP_SEQ, row] as const))
+
+  for (const rows of rest) {
+    const ids = new Set(rows.map((row) => row.RCP_SEQ))
+    for (const id of Array.from(intersection.keys())) {
+      if (!ids.has(id)) {
+        intersection.delete(id)
+      }
+    }
+  }
+
+  return Array.from(intersection.values())
+}
+
+export function toMealSummaryFromKorean(row: CookRcpRow): MealSummary {
+  return {
+    idMeal: row.RCP_SEQ,
+    strMeal: row.RCP_NM,
+    strMealThumb: row.ATT_FILE_NO_MAIN || row.ATT_FILE_NO_MK || '',
+  }
+}
+
+export function toMealDetailFromKorean(row: CookRcpRow): MealDetailRaw {
   const detail: MealDetailRaw = {
-    idMeal: recipe.RCP_SEQ,
-    strMeal: recipe.RCP_NM,
-    strMealThumb: recipe.ATT_FILE_NO_MAIN || recipe.ATT_FILE_NO_MK || '',
-    strInstructions: mergeManuals(recipe),
-    strSource: source,
+    idMeal: row.RCP_SEQ,
+    strMeal: row.RCP_NM,
+    strMealThumb: row.ATT_FILE_NO_MAIN || row.ATT_FILE_NO_MK || '',
+    strInstructions: extractManualSteps(row).join('\n'),
+    strSource: null,
     strYoutube: null,
   }
 
+  const tokens = splitIngredientTokens(row)
+  tokens.forEach((token, index) => {
+    const key = index + 1
+    const { name, measure } = tokenizeIngredient(token)
+    detail[`strIngredient${key}`] = name
+    if (measure) {
+      detail[`strMeasure${key}`] = measure
+    }
+  })
+
+  const tip = normalizeWhitespace(row.RCP_NA_TIP)
   if (tip) {
     detail.strTip = tip
   }
 
-  const ingredients = parseParts(recipe.RCP_PARTS_DTLS)
-  ingredients.forEach((value, index) => {
-    const key = index + 1
-    detail[`strIngredient${key}`] = value
-    detail[`strMeasure${key}`] = ''
+  const nutritionKeys: Array<keyof CookRcpRow> = ['INFO_ENG', 'INFO_CAR', 'INFO_PRO', 'INFO_FAT', 'INFO_NA', 'INFO_WGT']
+  nutritionKeys.forEach((key) => {
+    const value = row[key]
+    if (typeof value === 'string' && value.trim()) {
+      detail[key] = value
+    }
   })
 
   return detail
-}
-
-export async function fetchKoreanRecipesByIngredients({
-  serviceKey,
-  ingredients,
-  signal,
-}: {
-  serviceKey: string
-  ingredients: string[]
-  signal?: AbortSignal
-}): Promise<KoreanRecipeRaw[]> {
-  const uniqueIngredients = normalizeIngredientList(ingredients)
-  if (uniqueIngredients.length === 0) {
-    return []
-  }
-
-  const lists = await Promise.all(
-    uniqueIngredients.map((ingredient) =>
-      fetchKoreanRecipes({
-        serviceKey,
-        RCP_PARTS_DTLS: ingredient,
-        signal,
-      }),
-    ),
-  )
-
-  if (lists.some((list) => list.length === 0)) {
-    return []
-  }
-
-  const counts = new Map<string, number>()
-  const recipeMap = new Map<string, KoreanRecipeRaw>()
-
-  lists.forEach((list) => {
-    const seen = new Set<string>()
-    list.forEach((recipe) => {
-      const id = recipe.RCP_SEQ
-      if (!recipeMap.has(id)) {
-        recipeMap.set(id, recipe)
-      }
-      if (!seen.has(id)) {
-        seen.add(id)
-        counts.set(id, (counts.get(id) ?? 0) + 1)
-      }
-    })
-  })
-
-  return Array.from(recipeMap.values()).filter(
-    (recipe) =>
-      counts.get(recipe.RCP_SEQ) === uniqueIngredients.length &&
-      recipeIncludesAllIngredients(recipe, uniqueIngredients),
-  )
 }
